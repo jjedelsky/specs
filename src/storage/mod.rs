@@ -40,7 +40,7 @@ mod track;
 /// that do not have a particular component type.
 pub struct AntiStorage<'a>(&'a BitSet);
 
-impl<'a> Join for AntiStorage<'a> {
+impl<'a, 'b> Join<'b> for AntiStorage<'a> {
     type Type = ();
     type Value = ();
     type Mask = BitSetNot<&'a BitSet>;
@@ -57,7 +57,7 @@ impl<'a> Join for AntiStorage<'a> {
 unsafe impl<'a> DistinctStorage for AntiStorage<'a> {}
 
 #[cfg(feature = "parallel")]
-unsafe impl<'a> ParJoin for AntiStorage<'a> {}
+unsafe impl<'a> ParJoin<'a> for AntiStorage<'a> {}
 
 /// A dynamic storage.
 pub trait AnyStorage {
@@ -460,7 +460,7 @@ unsafe impl<'a, T: Component, D> DistinctStorage for Storage<'a, T, D> where
     T::Storage: DistinctStorage
 {}
 
-impl<'a, 'e, T, D> Join for &'a Storage<'e, T, D>
+impl<'a: 'b, 'b, 'e, T, D> Join<'b> for &'a Storage<'e, T, D>
 where
     T: Component,
     D: Deref<Target = MaskedStorage<T>>,
@@ -491,14 +491,15 @@ where
 }
 
 #[cfg(feature = "parallel")]
-unsafe impl<'a, 'e, T, D> ParJoin for &'a Storage<'e, T, D>
+unsafe impl<'a, 'e, 'b, T, D> ParJoin<'b> for &'a Storage<'e, T, D>
 where
+    Self: Join<'b>,
     T: Component,
     D: Deref<Target = MaskedStorage<T>>,
     T::Storage: Sync,
 {}
 
-impl<'a, 'e, T, D> Join for &'a mut Storage<'e, T, D>
+impl<'a, 'e, T, D> Join<'a> for &'a mut Storage<'e, T, D>
 where
     T: Component,
     D: DerefMut<Target = MaskedStorage<T>>,
@@ -511,18 +512,16 @@ where
         self.data.open_mut()
     }
 
-    unsafe fn get(v: &mut Self::Value, i: Index) -> &'a mut T {
-        // This is horribly unsafe. Unfortunately, Rust doesn't provide a way
-        // to abstract mutable/immutable state at the moment, so we have to hack
-        // our way through it.
-        let value: *mut Self::Value = v as *mut Self::Value;
-        (*value).get_mut(i)
+    unsafe fn get(value: &'a mut &'a mut T::Storage, i: Index) -> &'a mut T
+    {
+        value.get_mut(i)
     }
 }
 
 #[cfg(feature = "parallel")]
-unsafe impl<'a, 'e, T, D> ParJoin for &'a mut Storage<'e, T, D>
+unsafe impl<'a, 'e, 'b, T, D> ParJoin<'b> for &'a mut Storage<'e, T, D>
 where
+    Self: Join<'b>,
     T: Component,
     D: DerefMut<Target = MaskedStorage<T>>,
     T::Storage: Sync + DistinctStorage,
@@ -563,12 +562,12 @@ pub trait UnprotectedStorage<T>: TryDefault {
     /// Tries reading the data associated with an `Index`.
     /// This is unsafe because the external set used
     /// to protect this storage is absent.
-    unsafe fn get(&self, id: Index) -> &T;
+    unsafe fn get<'a>(&'a self, id: Index) -> &'a T;
 
     /// Tries mutating the data associated with an `Index`.
     /// This is unsafe because the external set used
     /// to protect this storage is absent.
-    unsafe fn get_mut(&mut self, id: Index) -> &mut T;
+    unsafe fn get_mut<'a>(&'a mut self, id: Index) -> &'a mut T;
 
     /// Inserts new data for a given `Index`.
     unsafe fn insert(&mut self, id: Index, value: T);

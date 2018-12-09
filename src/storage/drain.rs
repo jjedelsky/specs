@@ -11,7 +11,7 @@ pub struct Drain<'a, T: Component> {
     pub data: &'a mut MaskedStorage<T>,
 }
 
-impl<'a, T> Join for Drain<'a, T>
+impl<'a, T> Join<'a> for Drain<'a, T>
 where
     T: Component,
 {

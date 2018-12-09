@@ -105,7 +105,7 @@ where
     }
 }
 
-impl<'a, T> Join for &'a mut ChangeSet<T> {
+impl<'a, T> Join<'a> for &'a mut ChangeSet<T> {
     type Type = &'a mut T;
     type Value = &'a mut DenseVecStorage<T>;
     type Mask = &'a BitSet;
@@ -114,13 +114,12 @@ impl<'a, T> Join for &'a mut ChangeSet<T> {
         (&self.mask, &mut self.inner)
     }
 
-    unsafe fn get(v: &mut Self::Value, id: Index) -> Self::Type {
-        let value: *mut Self::Value = v as *mut Self::Value;
-        (*value).get_mut(id)
+    unsafe fn get(value: &'a mut &'a mut DenseVecStorage<T>, id: Index) -> Self::Type {
+        value.get_mut(id)
     }
 }
 
-impl<'a, T> Join for &'a ChangeSet<T> {
+impl<'a: 'b, 'b, T> Join<'b> for &'a ChangeSet<T> {
     type Type = &'a T;
     type Value = &'a DenseVecStorage<T>;
     type Mask = &'a BitSet;
@@ -134,7 +133,7 @@ impl<'a, T> Join for &'a ChangeSet<T> {
     }
 }
 
-impl<T> Join for ChangeSet<T> {
+impl<'a, T: 'a> Join<'a> for ChangeSet<T> {
     type Type = T;
     type Value = DenseVecStorage<T>;
     type Mask = BitSet;

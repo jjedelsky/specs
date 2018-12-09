@@ -80,9 +80,10 @@ where
 }
 
 #[cfg(feature = "parallel")]
-unsafe impl<'rf, 'st: 'rf, C, S, B> ParJoin
+unsafe impl<'rf, 'st: 'rf, 'b, C, S, B> ParJoin<'b>
     for &'rf mut RestrictedStorage<'rf, 'st, C, S, B, MutableParallelRestriction>
 where
+    Self: Join<'b>,
     C: Component,
     S: BorrowMut<C::Storage> + 'rf,
     B: Borrow<BitSet> + 'rf,
@@ -90,9 +91,10 @@ where
 }
 
 #[cfg(feature = "parallel")]
-unsafe impl<'rf, 'st: 'rf, C, S, B, Restrict> ParJoin
+unsafe impl<'rf, 'st: 'rf, 'b, C, S, B, Restrict> ParJoin<'b>
     for &'rf RestrictedStorage<'rf, 'st, C, S, B, Restrict>
 where
+    Self: Join<'b>,
     C: Component,
     S: Borrow<C::Storage> + 'rf,
     B: Borrow<BitSet> + 'rf,
@@ -100,7 +102,7 @@ where
 {
 }
 
-impl<'rf, 'st: 'rf, C, S, B, Restrict> Join for &'rf RestrictedStorage<'rf, 'st, C, S, B, Restrict>
+impl<'rf: 'b, 'st: 'rf, 'b, C, S, B, Restrict> Join<'b> for &'rf RestrictedStorage<'rf, 'st, C, S, B, Restrict>
 where
     C: Component,
     S: Borrow<C::Storage>,
@@ -124,7 +126,7 @@ where
     }
 }
 
-impl<'rf, 'st: 'rf, C, S, B, Restrict> Join
+impl<'rf: 'b, 'st: 'rf, 'b: 'rf, C, S, B, Restrict> Join<'b>
     for &'rf mut RestrictedStorage<'rf, 'st, C, S, B, Restrict>
 where
     C: Component,
@@ -142,8 +144,7 @@ where
         let bitset = self.bitset.borrow();
         (bitset, (self.data.borrow_mut(), self.entities, bitset))
     }
-    unsafe fn get(value: &mut Self::Value, id: Index) -> Self::Type {
-        let value: &'rf mut Self::Value = &mut *(value as *mut Self::Value);
+    unsafe fn get(value: &'b mut Self::Value, id: Index) -> Self::Type {
         PairedStorage {
             index: id,
             storage: value.0,

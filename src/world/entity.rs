@@ -310,7 +310,7 @@ impl EntitiesRes {
     }
 }
 
-impl<'a> Join for &'a EntitiesRes {
+impl<'a: 'b, 'b> Join<'b> for &'a EntitiesRes {
     type Type = Entity;
     type Value = Self;
     type Mask = BitSetOr<&'a BitSet, &'a AtomicBitSet>;
@@ -330,7 +330,7 @@ impl<'a> Join for &'a EntitiesRes {
 }
 
 #[cfg(feature = "parallel")]
-unsafe impl<'a> ParJoin for &'a EntitiesRes {}
+unsafe impl<'a: 'b, 'b> ParJoin<'b> for &'a EntitiesRes {}
 
 /// An entity builder from `EntitiesRes`.  Allows building an entity with its
 /// components if you have mutable access to the component storages.

@@ -13,7 +13,7 @@ use world::Index;
 
 macro_rules! define_bit_join {
     ( impl < ( $( $lifetime:tt )* ) ( $( $arg:ident ),* ) > for $bitset:ty ) => {
-        impl<$( $lifetime, )* $( $arg ),*> Join for $bitset
+        impl<'z, $( $lifetime, )* $( $arg ),*> Join<'z> for $bitset
             where $( $arg: BitSetLike ),* 
         {
             type Type = Index;
@@ -22,13 +22,13 @@ macro_rules! define_bit_join {
             unsafe fn open(self) -> (Self::Mask, Self::Value) {
                 (self, ())
             }
-            unsafe fn get(_: &mut Self::Value, id: Index) -> Self::Type {
+            unsafe fn get(_: &'z mut Self::Value, id: Index) -> Self::Type {
                 id
             }
         }
 
         #[cfg(feature = "parallel")]
-        unsafe impl<$( $lifetime, )* $( $arg ),*> ParJoin for $bitset
+        unsafe impl<'z, $( $lifetime, )* $( $arg ),*> ParJoin<'z> for $bitset
             where $( $arg: BitSetLike ),*
         { }
     }

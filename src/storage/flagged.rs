@@ -160,11 +160,11 @@ impl<C: Component, T: UnprotectedStorage<C>> UnprotectedStorage<C> for FlaggedSt
         self.storage.clean(has);
     }
 
-    unsafe fn get(&self, id: Index) -> &C {
+    unsafe fn get<'a>(&'a self, id: Index) -> &'a C {
         self.storage.get(id)
     }
 
-    unsafe fn get_mut(&mut self, id: Index) -> &mut C {
+    unsafe fn get_mut<'a>(&'a mut self, id: Index) -> &'a mut C {
         // calling `.iter()` on an unconstrained mutable storage will flag everything
         self.channel.single_write(ComponentEvent::Modified(id));
         self.storage.get_mut(id)

@@ -1,4 +1,5 @@
 
+use std::marker::PhantomData;
 use std::cell::UnsafeCell;
 
 use hibitset::{BitProducer, BitSetLike};
@@ -11,9 +12,9 @@ use join::Join;
 /// The purpose of the `ParJoin` trait is to provide a way
 /// to access multiple storages in parallel at the same time with
 /// the merged bit set.
-pub unsafe trait ParJoin: Join {
+pub unsafe trait ParJoin<'a>: Join<'a> {
     /// Create a joined parallel iterator over the contents.
-    fn par_join(self) -> JoinParIter<Self>
+    fn par_join(self) -> JoinParIter<'a, Self>
     where
         Self: Sized,
     {
@@ -21,17 +22,17 @@ pub unsafe trait ParJoin: Join {
             println!("WARNING: `ParJoin` possibly iterating through all indices, you might've made a join with all `MaybeJoin`s, which is unbounded in length.");
         }
 
-        JoinParIter(self)
+        JoinParIter(self, PhantomData)
     }
 }
 
 /// `JoinParIter` is a `ParallelIterator` over a group of `Storages`.
 #[must_use]
-pub struct JoinParIter<J>(J);
+pub struct JoinParIter<'a, J: Join<'a>>(J, PhantomData<&'a mut ()>);
 
-impl<J> ParallelIterator for JoinParIter<J>
+impl<'a, J> ParallelIterator for JoinParIter<'a, J>
 where
-    J: Join + Send,
+    J: 'a + Join<'a> + Send,
     J::Mask: Send + Sync,
     J::Type: Send,
     J::Value: Send,
@@ -51,40 +52,40 @@ where
     }
 }
 
-struct JoinProducer<'a, J>
+struct JoinProducer<'a, 'b, J>
 where
-    J: Join + Send,
+    J: Join<'b> + Send,
     J::Mask: Send + Sync + 'a,
     J::Type: Send,
     J::Value: Send + 'a,
 {
-    keys: BitProducer<'a, J::Mask>,
-    values: &'a UnsafeCell<J::Value>,
+    keys: BitProducer<'a, <J as Join<'b>>::Mask>,
+    values: &'a UnsafeCell<<J as Join<'b>>::Value>,
 }
 
-impl<'a, J> JoinProducer<'a, J>
+impl<'a, 'b: 'a, J> JoinProducer<'a, 'b, J>
 where
-    J: Join + Send,
+    J: 'a + Join<'b> + Send,
     J::Type: Send,
     J::Value: 'a + Send,
     J::Mask: 'a + Send + Sync,
 {
-    fn new(keys: BitProducer<'a, J::Mask>, values: &'a UnsafeCell<J::Value>) -> Self {
+    fn new(keys: BitProducer<'a, <J as Join<'b>>::Mask>, values: &'a UnsafeCell<<J as Join<'b>>::Value>) -> Self {
         JoinProducer { keys, values }
     }
 }
 
-unsafe impl<'a, J> Send for JoinProducer<'a, J>
+unsafe impl<'a, 'b: 'a, J> Send for JoinProducer<'a, 'b, J>
 where
-    J: Join + Send,
+    J: 'a + Join<'b> + Send,
     J::Type: Send,
     J::Value: 'a + Send,
     J::Mask: 'a + Send + Sync,
 {}
 
-impl<'a, J> UnindexedProducer for JoinProducer<'a, J>
+impl<'a, 'b: 'a, J> UnindexedProducer for JoinProducer<'a, 'b, J>
 where
-    J: Join + Send,
+    J: 'a + Join<'b> + Send,
     J::Type: Send,
     J::Value: 'a + Send,
     J::Mask: 'a + Send + Sync,

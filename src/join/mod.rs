@@ -144,16 +144,16 @@ bitset_and!{A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P}
 ///
 /// `Join` can also be used to iterate over a single
 /// storage, just by writing `(&storage).join()`.
-pub trait Join {
+pub trait Join<'a> {
     /// Type of joined components.
     type Type;
     /// Type of joined storages.
-    type Value;
+    type Value: 'a;
     /// Type of joined bit mask.
     type Mask: BitSetLike;
 
     /// Create a joined iterator over the contents.
-    fn join(self) -> JoinIter<Self>
+    fn join(self) -> JoinIter<'a, Self>
     where
         Self: Sized,
     {
@@ -230,7 +230,7 @@ pub trait Join {
     unsafe fn open(self) -> (Self::Mask, Self::Value);
 
     /// Get a joined component value by a given index.
-    unsafe fn get(value: &mut Self::Value, id: Index) -> Self::Type;
+    unsafe fn get(value: &'a mut Self::Value, id: Index) -> Self::Type;
 
     /// If this `Join` typically returns all indices in the mask, then iterating over only it
     /// or combined with other joins that are also dangerous will cause the `JoinIter`/`ParJoin` to
@@ -252,20 +252,20 @@ pub trait Join {
 /// join to all entities that are alive.
 ///
 /// [`Join::maybe()`]: ../join/trait.Join.html#method.maybe
-pub struct MaybeJoin<J: Join>(pub J);
+pub struct MaybeJoin<J>(pub J);
 
-impl<T> Join for MaybeJoin<T>
+impl<'a, T: 'a> Join<'a> for MaybeJoin<T>
 where
-    T: Join,
+    T: Join<'a>,
 {
-    type Type = Option<<T as Join>::Type>;
-    type Value = (<T as Join>::Mask, <T as Join>::Value);
+    type Type = Option<<T as Join<'a>>::Type>;
+    type Value = (<T as Join<'a>>::Mask, <T as Join<'a>>::Value);
     type Mask = BitSetAll;
     unsafe fn open(self) -> (Self::Mask, Self::Value) {
         let (mask, value) = self.0.open();
         (BitSetAll, (mask, value))
     }
-    unsafe fn get((mask, value): &mut Self::Value, id: Index) -> Self::Type {
+    unsafe fn get((mask, value): &'a mut Self::Value, id: Index) -> Self::Type {
         if mask.contains(id) {
             Some(<T as Join>::get(value, id))
         } else {
@@ -281,12 +281,12 @@ where
 
 /// `JoinIter` is an `Iterator` over a group of `Storages`.
 #[must_use]
-pub struct JoinIter<J: Join> {
+pub struct JoinIter<'a, J: Join<'a>> {
     keys: BitIter<J::Mask>,
     values: J::Value,
 }
 
-impl<J: Join> JoinIter<J> {
+impl<'a, J: Join<'a>> JoinIter<'a, J> {
     /// Create a new join iterator.
     pub fn new(j: J) -> Self {
         if <J as Join>::is_unconstrained() {
@@ -301,7 +301,7 @@ impl<J: Join> JoinIter<J> {
     }
 }
 
-impl<J: Join> JoinIter<J> {
+impl<'a, J: Join<'a>> JoinIter<'a, J> {
     /// Allows getting joined values for specific entity.
     ///
     /// ## Example
@@ -351,7 +351,7 @@ impl<J: Join> JoinIter<J> {
     ///     );
     /// }
     /// ```
-    pub fn get(&mut self, entity: Entity, entities: &Entities) -> Option<J::Type> {
+    pub fn get(&'a mut self, entity: Entity, entities: &Entities) -> Option<J::Type> {
         if self.keys.contains(entity.id()) && entities.is_alive(entity) {
             Some(unsafe { J::get(&mut self.values, entity.id()) })
         } else {
@@ -365,7 +365,7 @@ impl<J: Join> JoinIter<J> {
     ///
     /// As this method operates on raw indices, there is no check to see if the entity is still alive,
     /// so the caller should ensure it instead.
-    pub fn get_unchecked(&mut self, index: Index) -> Option<J::Type> {
+    pub fn get_unchecked(&'a mut self, index: Index) -> Option<J::Type> {
         if self.keys.contains(index) {
             Some(unsafe { J::get(&mut self.values, index) })
         } else {
@@ -374,22 +374,26 @@ impl<J: Join> JoinIter<J> {
     }
 }
 
-impl<J: Join> std::iter::Iterator for JoinIter<J> {
+impl<'a, J: Join<'a>> std::iter::Iterator for JoinIter<'a, J> {
     type Item = J::Type;
 
     fn next(&mut self) -> Option<J::Type> {
+        // FIXME: This is HACK.
+        // If iterator over bitset (`self.keys`) yields one index
+        // twice this would lead to multiple mutable references.
+        let values = &mut self.values as *mut _;
         self.keys
             .next()
-            .map(|idx| unsafe { J::get(&mut self.values, idx) })
+            .map(|idx| unsafe { J::get(&mut *values, idx) })
     }
 }
 
 macro_rules! define_open {
     // use variables to indicate the arity of the tuple
     ($($from:ident),*) => {
-        impl<$($from,)*> Join for ($($from),*,)
-            where $($from: Join),*,
-                  ($(<$from as Join>::Mask,)*): BitAnd,
+        impl<'a, $($from,)*> Join<'a> for ($($from),*,)
+            where $($from: Join<'a>),*,
+                  ($(<$from as Join<'a>>::Mask,)*): BitAnd,
         {
             type Type = ($($from::Type),*,);
             type Value = ($($from::Value),*,);
@@ -405,7 +409,7 @@ macro_rules! define_open {
             }
 
             #[allow(non_snake_case)]
-            unsafe fn get(v: &mut Self::Value, i: Index) -> Self::Type {
+            unsafe fn get(v: &'a mut Self::Value, i: Index) -> Self::Type {
                 let &mut ($(ref mut $from,)*) = v;
                 ($($from::get($from, i),)*)
             }
@@ -418,9 +422,9 @@ macro_rules! define_open {
             }
         }
         #[cfg(feature = "parallel")]
-        unsafe impl<$($from,)*> ParJoin for ($($from),*,)
-            where $($from: ParJoin),*,
-                  ($(<$from as Join>::Mask,)*): BitAnd,
+        unsafe impl<'a, $($from,)*> ParJoin<'a> for ($($from),*,)
+            where $($from: ParJoin<'a>),*,
+                  ($(<$from as Join<'a>>::Mask,)*): BitAnd,
         {}
 
     }
@@ -455,19 +459,19 @@ define_open!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
 macro_rules! immutable_resource_join {
     ($($ty:ty),*) => {
         $(
-        impl<'a, 'b, T> Join for &'a $ty
+        impl<'a, 'b, 'c, T> Join<'c> for &'a $ty
         where
-            &'a T: Join,
+            &'a T: Join<'c>,
             T: Resource,
         {
-            type Type = <&'a T as Join>::Type;
-            type Value = <&'a T as Join>::Value;
-            type Mask = <&'a T as Join>::Mask;
+            type Type = <&'a T as Join<'c>>::Type;
+            type Value = <&'a T as Join<'c>>::Value;
+            type Mask = <&'a T as Join<'c>>::Mask;
             unsafe fn open(self) -> (Self::Mask, Self::Value) {
                 self.deref().open()
             }
 
-            unsafe fn get(v: &mut Self::Value, i: Index) -> Self::Type {
+            unsafe fn get(v: &'c mut Self::Value, i: Index) -> Self::Type {
                 <&'a T as Join>::get(v, i)
             }
 
@@ -478,9 +482,9 @@ macro_rules! immutable_resource_join {
         }
 
         #[cfg(feature = "parallel")]
-        unsafe impl<'a, 'b, T> ParJoin for &'a $ty
+        unsafe impl<'a, 'b, T> ParJoin<'a> for &'a $ty
         where
-            &'a T: ParJoin,
+            &'a T: ParJoin<'a>,
             T: Resource
         {}
         )*
@@ -490,19 +494,19 @@ macro_rules! immutable_resource_join {
 macro_rules! mutable_resource_join {
     ($($ty:ty),*) => {
         $(
-        impl<'a, 'b, T> Join for &'a mut $ty
+        impl<'a, 'b, 'c, T> Join<'c> for &'a mut $ty
         where
-            &'a mut T: Join,
+            &'a mut T: Join<'c>,
             T: Resource,
         {
-            type Type = <&'a mut T as Join>::Type;
-            type Value = <&'a mut T as Join>::Value;
-            type Mask = <&'a mut T as Join>::Mask;
+            type Type = <&'a mut T as Join<'c>>::Type;
+            type Value = <&'a mut T as Join<'c>>::Value;
+            type Mask = <&'a mut T as Join<'c>>::Mask;
             unsafe fn open(self) -> (Self::Mask, Self::Value) {
                 self.deref_mut().open()
             }
 
-            unsafe fn get(v: &mut Self::Value, i: Index) -> Self::Type {
+            unsafe fn get(v: &'c mut Self::Value, i: Index) -> Self::Type {
                 <&'a mut T as Join>::get(v, i)
             }
 
@@ -513,9 +517,9 @@ macro_rules! mutable_resource_join {
         }
 
         #[cfg(feature = "parallel")]
-        unsafe impl<'a, 'b, T> ParJoin for &'a mut $ty
+        unsafe impl<'a, 'b, T> ParJoin<'a> for &'a mut $ty
         where
-            &'a mut T: ParJoin,
+            &'a mut T: ParJoin<'a>,
             T: Resource
         {}
         )*
